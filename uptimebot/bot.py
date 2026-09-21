@@ -30,6 +30,7 @@ ROOT = Path(__file__).resolve().parent.parent
 INTERVALS = [1, 2, 5, 10, 15, 30, 60]
 DEFAULT_INTERVAL = 5
 LOCATIONS = {"out": "🌍 خارج", "iran": "🇮🇷 ایران", "both": "🌍🇮🇷 هر دو"}
+SECTION_OUT, SECTION_IRAN, SECTION_GENERAL = "🌍 از خارج", "🇮🇷 از ایران", "🌐 دامنه"
 NEXT_LOCATION = {"both": "out", "out": "iran", "iran": "both"}
 TICK_SECONDS = 15
 MAX_PARALLEL = 10
@@ -122,41 +123,55 @@ def delete_view(site):
 
 
 def format_report(domain, rows, full=False) -> str:
-    """rows: list of (label, Result)."""
-    bad = [r for _, r in rows if r.ok is False]
+    """rows: list of (section, label, Result). Sections keep their order; an empty title is not printed."""
+    sections = {}
+    for section, label, r in rows:
+        sections.setdefault(section, []).append((label, r))
+    bad = sum(1 for _, _, r in rows if r.ok is False)
+    good = sum(1 for _, _, r in rows if r.ok is True)
+
     if bad:
-        lines = [f"🔴 <b>{esc(domain)}</b> — {len(bad)} مشکل"]
+        blocks = [f"🔴 <b>{esc(domain)}</b>\n{bad} مشکل پیدا شد"]
     else:
-        lines = [f"🟢 <b>{esc(domain)}</b> — همه چیز اوکیه ✅"]
-    for label, r in rows:
-        if full or r.ok is False:
-            icon = "✅" if r.ok is True else "❌" if r.ok is False else "➖"
-            lines.append(f"{icon} {label}: {esc(r.detail)}")
-    if not full:
-        lines.append(f"({sum(1 for _, r in rows if r.ok is True)} چک سالم)")
-    return "\n".join(lines)
+        blocks = [f"🟢 <b>{esc(domain)}</b>\nهمه چیز اوکیه ✅" + ("" if full else f"  ({good} چک)")]
+    if full or bad:
+        for title, items in sections.items():
+            lines = [f"<b>{title}</b>"] if title else []
+            for label, r in items:
+                if full or r.ok is False:
+                    icon = "✅" if r.ok is True else "❌" if r.ok is False else "➖"
+                    lines.append(f"{icon} {label} — {esc(r.detail)}")
+            if len(lines) > (1 if title else 0):
+                blocks.append("\n".join(lines))
+        if bad and not full:
+            blocks.append(f"✅ {good} چک دیگر سالم است")
+    return "\n\n".join(blocks)
 
 
 async def collect(site, iran):
-    """Run the site's checks from the selected location(s); returns [(label, Result)]."""
+    """Run the site's checks from the selected location(s); returns [(section, label, Result)]."""
     names = site_checks(site)
     loc = site["location"] if iran else "out"
     local = [n for n in names if loc != "iran" or n in checks.LOCATION_FREE]
     remote = [n for n in names if loc != "out" and n not in checks.LOCATION_FREE]
-    tag_out = " 🌍" if loc == "both" else ""
+    sections = loc != "out"  # titles only matter once Iran is involved
 
     async def remote_rows():
         try:
             res = await checks.run_remote(*iran, site["domain"], remote)
         except Exception as e:
-            return [("چک‌کننده ایران 🇮🇷", checks.Result(False, str(e) or type(e).__name__))]
-        return [(f"{checks.CHECKS[n]} 🇮🇷", r) for n, r in res.items()]
+            return [(SECTION_IRAN, "چک‌کننده", checks.Result(False, str(e) or type(e).__name__))]
+        return [(SECTION_IRAN, checks.CHECKS[n], r) for n, r in res.items()]
 
     local_res, remote_res = await asyncio.gather(
         checks.run_checks(site["domain"], local) if local else asyncio.sleep(0, {}),
         remote_rows() if remote else asyncio.sleep(0, []),
     )
-    rows = [(checks.CHECKS[n] + ("" if n in checks.LOCATION_FREE else tag_out), r) for n, r in local_res.items()]
+    rows = [
+        (("" if not sections else SECTION_GENERAL if n in checks.LOCATION_FREE else SECTION_OUT), checks.CHECKS[n], r)
+        for n, r in local_res.items()
+    ]
+    rows.sort(key=lambda row: row[0] == SECTION_GENERAL)  # general section last, before Iran is appended
     return rows + remote_res
 
 
@@ -265,7 +280,7 @@ async def process(app: Application, site, sem: asyncio.Semaphore):
         return
     async with sem:
         rows = await collect(site, app.bot_data["iran"])
-    ok = all(r.ok is not False for _, r in rows)
+    ok = all(r.ok is not False for _, _, r in rows)
     recovered = ok and not site["last_ok"]
     app.bot_data["db"].update(site["id"], last_ok=int(ok))
     if ok and site["only_problems"] and not recovered:

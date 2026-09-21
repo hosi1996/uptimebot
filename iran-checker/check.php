@@ -74,21 +74,21 @@ function fetch(string $url, bool $follow): array
 function check_dns(string $d): array
 {
     $ips = array_merge(dns_values($d, DNS_A, 'ip'), dns_values($d, DNS_AAAA, 'ipv6'));
-    return $ips ? result(true, implode(', ', $ips)) : result(false, 'no A/AAAA record');
+    return $ips ? result(true, implode(', ', $ips)) : result(false, 'رکورد A/AAAA وجود ندارد');
 }
 
 function check_ns(string $d): array
 {
     $ns = dns_values(base_domain($d), DNS_NS, 'target');
     sort($ns);
-    return $ns ? result(true, implode(', ', $ns)) : result(false, 'no NS record');
+    return $ns ? result(true, implode(', ', $ns)) : result(false, 'رکورد NS وجود ندارد');
 }
 
 function check_mx(string $d): array
 {
     $mx = dns_values($d, DNS_MX, 'target');
     sort($mx);
-    return $mx ? result(true, implode(', ', $mx)) : result(false, 'no MX record');
+    return $mx ? result(true, implode(', ', $mx)) : result(false, 'رکورد MX وجود ندارد');
 }
 
 function check_ping(string $d): array
@@ -98,10 +98,10 @@ function check_ping(string $d): array
         $socket = @fsockopen($d, $port, $errno, $errstr, TIMEOUT);
         if ($socket) {
             fclose($socket);
-            return result(true, sprintf('TCP:%d %dms', $port, (microtime(true) - $start) * 1000));
+            return result(true, sprintf('%dms (TCP %d)', (microtime(true) - $start) * 1000, $port));
         }
     }
-    return result(false, 'no TCP answer on 443/80');
+    return result(false, 'بدون پاسخ روی پورت 443/80');
 }
 
 function check_http(array $f): array
@@ -115,7 +115,7 @@ function check_redirect(array $f, bool $httpSelected): array
         return result($httpSelected ? null : false, $f['error']);
     }
     $redirects = in_array($f['code'], [301, 302, 303, 307, 308], true) && strpos($f['location'], 'https://') === 0;
-    return $redirects ? result(true, (string)$f['code']) : result(false, 'no redirect to HTTPS (HTTP ' . $f['code'] . ')');
+    return $redirects ? result(true, (string)$f['code']) : result(false, 'ریدایرکت به HTTPS ندارد (HTTP ' . $f['code'] . ')');
 }
 
 function check_speed(array $f, bool $httpsSelected): array
@@ -124,7 +124,7 @@ function check_speed(array $f, bool $httpsSelected): array
         return result($httpsSelected ? null : false, $f['error']);
     }
     $ok = $f['time'] <= SLOW_SECONDS;
-    return result($ok, sprintf('%.2fs', $f['time']) . ($ok ? '' : ' (slower than ' . SLOW_SECONDS . 's)'));
+    return result($ok, sprintf('%.2fs', $f['time']) . ($ok ? '' : ' (بیشتر از ' . SLOW_SECONDS . 's)'));
 }
 
 function check_ssl(string $d): array
@@ -138,16 +138,16 @@ function check_ssl(string $d): array
     ]]);
     $socket = @stream_socket_client("ssl://$d:443", $errno, $errstr, TIMEOUT, STREAM_CLIENT_CONNECT, $context);
     if (!$socket) {
-        return result(false, $errstr ?: 'TLS connection failed');
+        return result(false, $errstr ?: 'اتصال TLS ناموفق');
     }
     $cert = stream_context_get_params($socket)['options']['ssl']['peer_certificate'] ?? null;
     fclose($socket);
     $info = $cert ? openssl_x509_parse($cert) : null;
     if (!$info) {
-        return result(null, 'could not read certificate');
+        return result(null, 'خواندن گواهی ممکن نشد');
     }
     $days = (int)floor(($info['validTo_time_t'] - time()) / 86400);
-    return $days < SSL_WARN_DAYS ? result(false, "only $days days left") : result(true, "$days days left");
+    return $days < SSL_WARN_DAYS ? result(false, "فقط $days روز تا انقضا") : result(true, "$days روز تا انقضا");
 }
 
 // ---- request handling ----
