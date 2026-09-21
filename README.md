@@ -24,7 +24,7 @@ The bot uses long polling, so no domain, webhook or open port is needed.
    IRAN_CHECK_URL=https://hmoazzen.ir/uptimebot/check.php
    IRAN_CHECK_TOKEN=<same token>
    ```
-3. In the bot, each domain gets a **📍 محل چک** button: foreign / Iran / both. Results are tagged 🌍 / 🇮🇷. Domain expiry always runs from the bot server.
+3. In the bot, each domain gets a **📍 محل چک** button: both (default) / foreign only / Iran only. Results are tagged 🌍 / 🇮🇷. Domain expiry always runs from the bot server.
 
 On the Iran side "Ping" is a TCP connect to port 443/80 (shared hosts rarely allow ICMP).
 

@@ -21,13 +21,13 @@ class DB:
                 only_problems INTEGER NOT NULL DEFAULT 0,
                 last_run REAL NOT NULL DEFAULT 0,
                 last_ok INTEGER NOT NULL DEFAULT 1,
-                location TEXT NOT NULL DEFAULT 'out',
+                location TEXT NOT NULL DEFAULT 'both',
                 UNIQUE (chat_id, domain)
             )"""
         )
         columns = {r["name"] for r in self.conn.execute("PRAGMA table_info(sites)")}
         if "location" not in columns:
-            self.conn.execute("ALTER TABLE sites ADD COLUMN location TEXT NOT NULL DEFAULT 'out'")
+            self.conn.execute("ALTER TABLE sites ADD COLUMN location TEXT NOT NULL DEFAULT 'both'")
         self.conn.commit()
 
     def add(self, chat_id, domain, interval_min, checks):

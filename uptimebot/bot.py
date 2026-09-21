@@ -30,7 +30,7 @@ ROOT = Path(__file__).resolve().parent.parent
 INTERVALS = [1, 2, 5, 10, 15, 30, 60]
 DEFAULT_INTERVAL = 5
 LOCATIONS = {"out": "🌍 خارج", "iran": "🇮🇷 ایران", "both": "🌍🇮🇷 هر دو"}
-NEXT_LOCATION = {"out": "iran", "iran": "both", "both": "out"}
+NEXT_LOCATION = {"both": "out", "out": "iran", "iran": "both"}
 TICK_SECONDS = 15
 MAX_PARALLEL = 10
 DOMAIN_RE = re.compile(r"^(?=.{4,253}$)([a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?\.)+(xn--[a-z0-9-]+|[a-z]{2,63})$")
