@@ -16,6 +16,18 @@ Non-interactive: `curl -fsSL .../install.sh | sudo BOT_TOKEN=... ADMIN_IDS=... b
 
 The bot uses long polling, so no domain, webhook or open port is needed.
 
+## Checks from Iran (optional)
+
+1. Upload `iran-checker/check.php` to your Iran host (PHP 8+), e.g. `https://hmoazzen.ir/uptimebot/check.php`, and set a long random `TOKEN` inside it.
+2. On the server add to `/opt/uptimebot/.env`, then `systemctl restart uptimebot`:
+   ```
+   IRAN_CHECK_URL=https://hmoazzen.ir/uptimebot/check.php
+   IRAN_CHECK_TOKEN=<same token>
+   ```
+3. In the bot, each domain gets a **📍 محل چک** button: foreign / Iran / both. Results are tagged 🌍 / 🇮🇷. Domain expiry always runs from the bot server.
+
+On the Iran side "Ping" is a TCP connect to port 443/80 (shared hosts rarely allow ICMP).
+
 ## Useful commands
 
 ```bash

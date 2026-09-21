@@ -29,6 +29,8 @@ from .db import DB
 ROOT = Path(__file__).resolve().parent.parent
 INTERVALS = [1, 2, 5, 10, 15, 30, 60]
 DEFAULT_INTERVAL = 5
+LOCATIONS = {"out": "🌍 خارج", "iran": "🇮🇷 ایران", "both": "🌍🇮🇷 هر دو"}
+NEXT_LOCATION = {"out": "iran", "iran": "both", "both": "out"}
 TICK_SECONDS = 15
 MAX_PARALLEL = 10
 DOMAIN_RE = re.compile(r"^(?=.{4,253}$)([a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?\.)+(xn--[a-z0-9-]+|[a-z]{2,63})$")
@@ -73,7 +75,7 @@ def list_view(db, chat_id):
     return ("📋 <b>دامنه‌ها</b>" if len(rows) > 2 else "هنوز دامنه‌ای اضافه نکرده‌اید."), Markup(rows)
 
 
-def site_view(site, note=""):
+def site_view(site, iran, note=""):
     sid = site["id"]
     text = (
         f"{note}🌐 <b>{esc(site['domain'])}</b>\n"
@@ -82,11 +84,15 @@ def site_view(site, note=""):
         f"🔔 {'فقط مشکلات' if site['only_problems'] else 'همیشه گزارش'}\n"
         f"🔎 چک‌ها: {len(site_checks(site))} از {len(checks.CHECKS)}"
     )
+    location_row = [[Btn(f"📍 محل چک: {LOCATIONS[site['location']]}", callback_data=f"loc:{sid}")]] if iran else []
+    if iran:
+        text += f"\n📍 محل چک: {LOCATIONS[site['location']]}"
     return text, Markup([
         [Btn("▶️ بررسی الان", callback_data=f"run:{sid}")],
         [Btn("⏱ بازه", callback_data=f"iv:{sid}"), Btn("🔎 چک‌ها", callback_data=f"ck:{sid}")],
         [Btn("▶️ فعال‌سازی" if not site["enabled"] else "⏸ توقف", callback_data=f"en:{sid}"),
          Btn("🔔 همیشه" if site["only_problems"] else "🔕 فقط مشکلات", callback_data=f"op:{sid}")],
+        *location_row,
         [Btn("🗑 حذف", callback_data=f"del:{sid}")],
         [Btn("🔙 لیست", callback_data="list")],
     ])
@@ -115,20 +121,43 @@ def delete_view(site):
     )
 
 
-def format_report(domain, results, full=False) -> str:
-    bad = [n for n, r in results.items() if r.ok is False]
+def format_report(domain, rows, full=False) -> str:
+    """rows: list of (label, Result)."""
+    bad = [r for _, r in rows if r.ok is False]
     if bad:
         lines = [f"🔴 <b>{esc(domain)}</b> — {len(bad)} مشکل"]
     else:
         lines = [f"🟢 <b>{esc(domain)}</b> — همه چیز اوکیه ✅"]
-    for name, r in results.items():
+    for label, r in rows:
         if full or r.ok is False:
             icon = "✅" if r.ok is True else "❌" if r.ok is False else "➖"
-            lines.append(f"{icon} {checks.CHECKS[name]}: {esc(r.detail)}")
+            lines.append(f"{icon} {label}: {esc(r.detail)}")
     if not full:
-        good = sum(1 for r in results.values() if r.ok is True)
-        lines.append(f"({good} چک سالم)")
+        lines.append(f"({sum(1 for _, r in rows if r.ok is True)} چک سالم)")
     return "\n".join(lines)
+
+
+async def collect(site, iran):
+    """Run the site's checks from the selected location(s); returns [(label, Result)]."""
+    names = site_checks(site)
+    loc = site["location"] if iran else "out"
+    local = [n for n in names if loc != "iran" or n in checks.LOCATION_FREE]
+    remote = [n for n in names if loc != "out" and n not in checks.LOCATION_FREE]
+    tag_out = " 🌍" if loc == "both" else ""
+
+    async def remote_rows():
+        try:
+            res = await checks.run_remote(*iran, site["domain"], remote)
+        except Exception as e:
+            return [("چک‌کننده ایران 🇮🇷", checks.Result(False, str(e) or type(e).__name__))]
+        return [(f"{checks.CHECKS[n]} 🇮🇷", r) for n, r in res.items()]
+
+    local_res, remote_res = await asyncio.gather(
+        checks.run_checks(site["domain"], local) if local else asyncio.sleep(0, {}),
+        remote_rows() if remote else asyncio.sleep(0, []),
+    )
+    rows = [(checks.CHECKS[n] + ("" if n in checks.LOCATION_FREE else tag_out), r) for n, r in local_res.items()]
+    return rows + remote_res
 
 
 async def render(q, view):
@@ -172,7 +201,7 @@ async def on_text(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         site, note = db.get(site_id, chat_id), "✅ اضافه شد؛ بازه و چک‌ها را تنظیم کنید.\n\n"
     else:
         site, note = db.find(chat_id, domain), "این دامنه از قبل وجود دارد.\n\n"
-    text, markup = site_view(site, note)
+    text, markup = site_view(site, ctx.bot_data["iran"], note)
     await update.message.reply_text(text, reply_markup=markup, parse_mode=ParseMode.HTML)
 
 
@@ -199,12 +228,11 @@ async def on_button(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     sid = site["id"]
 
     if action == "run":
-        names = site_checks(site)
-        if not names:
+        if not site_checks(site):
             return await q.message.reply_text("هیچ چکی انتخاب نشده.")
         msg = await q.message.reply_text("⏳ در حال بررسی…")
-        results = await checks.run_checks(site["domain"], names)
-        return await msg.edit_text(format_report(site["domain"], results, full=True), parse_mode=ParseMode.HTML)
+        rows = await collect(site, ctx.bot_data["iran"])
+        return await msg.edit_text(format_report(site["domain"], rows, full=True), parse_mode=ParseMode.HTML)
     if action == "iv":
         return await render(q, interval_view(site))
     if action == "ck":
@@ -225,23 +253,24 @@ async def on_button(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         db.update(sid, enabled=1 - site["enabled"], last_run=time.time())
     elif action == "op":
         db.update(sid, only_problems=1 - site["only_problems"])
-    await render(q, site_view(db.get(sid, chat_id)))
+    elif action == "loc" and ctx.bot_data["iran"]:
+        db.update(sid, location=NEXT_LOCATION[site["location"]])
+    await render(q, site_view(db.get(sid, chat_id), ctx.bot_data["iran"]))
 
 
 # ---------- scheduler ----------
 
 async def process(app: Application, site, sem: asyncio.Semaphore):
-    names = site_checks(site)
-    if not names:
+    if not site_checks(site):
         return
     async with sem:
-        results = await checks.run_checks(site["domain"], names)
-    ok = all(r.ok is not False for r in results.values())
+        rows = await collect(site, app.bot_data["iran"])
+    ok = all(r.ok is not False for _, r in rows)
     recovered = ok and not site["last_ok"]
     app.bot_data["db"].update(site["id"], last_ok=int(ok))
     if ok and site["only_problems"] and not recovered:
         return
-    text = format_report(site["domain"], results)
+    text = format_report(site["domain"], rows)
     if recovered:
         text = "🎉 <b>بازیابی شد</b>\n" + text
     try:
@@ -277,6 +306,8 @@ def main():
     app = Application.builder().token(token).post_init(post_init).build()
     app.bot_data["db"] = DB(os.environ.get("DB_PATH") or ROOT / "data" / "uptimebot.db")
     app.bot_data["admins"] = admins
+    iran_url, iran_token = os.environ.get("IRAN_CHECK_URL", "").strip(), os.environ.get("IRAN_CHECK_TOKEN", "").strip()
+    app.bot_data["iran"] = (iran_url, iran_token) if iran_url and iran_token else None
 
     app.add_handler(TypeHandler(Update, guard), group=-1)
     app.add_handler(CommandHandler(["start", "menu"], cmd_menu))

@@ -23,6 +23,8 @@ CHECKS = {
     "speed": "سرعت پاسخ",
     "whois": "انقضای دامنه",
 }
+# checks whose result does not depend on where they run from
+LOCATION_FREE = {"whois"}
 DEFAULT_CHECKS = [n for n in CHECKS if n != "mx"]
 
 TIMEOUT = 10
@@ -217,3 +219,13 @@ async def run_checks(domain: str, names) -> "dict[str, Result]":
             return Result(None, f"خطای داخلی: {_err(e)}")
 
     return dict(zip(names, await asyncio.gather(*(run(n) for n in names))))
+
+
+async def run_remote(url: str, token: str, domain: str, names) -> "dict[str, Result]":
+    """Run checks through the Iran-hosted checker (iran-checker/check.php). Raises on failure."""
+    async with httpx.AsyncClient(timeout=60, headers=HEADERS) as client:
+        resp = await client.post(url, headers={"X-Token": token}, json={"domain": domain, "checks": list(names)})
+    if resp.status_code != 200:
+        raise RuntimeError(f"HTTP {resp.status_code}")
+    data = resp.json().get("results", {})
+    return {n: Result(data[n].get("ok"), str(data[n].get("detail", ""))) for n in CHECKS if n in data}
